@@ -1,33 +1,76 @@
 
-name: DevSecOps Automated DAST Pipeline
+name: DAST Pipeline Workflow for Security Scanning
 
 on:
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   dast_scan:
     name: Automated DAST Scanning Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Launch Target Web Application
         run: |
-          python3 -m http.server 8000 &
-          sleep 3
+          python3 -m http.server 8000 \
+            --bind 127.0.0.1 \
+            --directory . > server.log 2>&1 &
+          echo $! > server.pid
+
+          for i in $(seq 1 15); do
+            if curl --fail --silent http://127.0.0.1:8000/ \
+              -o /dev/null; then
+              echo "Website is running."
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat server.log
+          exit 1
 
       - name: Execute OWASP ZAP DAST Scan
-        uses: zaproxy/action-baseline@v0.13.0
+        id: zap_scan
+        continue-on-error: true
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          target: 'http://localhost:8000'
+          target: "http://127.0.0.1:8000"
           fail_action: false
+          allow_issue_writing: false
+          artifact_name: zap-report
+
+      - name: Stop Target Web Application
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload ZAP Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md
+          if-no-files-found: warn
+          retention-days: 7
