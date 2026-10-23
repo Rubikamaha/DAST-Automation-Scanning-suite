@@ -63,14 +63,16 @@ jobs:
             kill "$(cat server.pid)" 2>/dev/null || true
           fi
 
+      
       - name: Upload ZAP Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zap-report
+          name: zap-report-files
           path: |
             report_html.html
             report_json.json
             report_md.md
           if-no-files-found: warn
           retention-days: 7
+
